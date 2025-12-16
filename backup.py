@@ -1,25 +1,121 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-#import smtplib
-#import mimetypes
-#import email.mime.application
-#from email.mime.multipart import MIMEMultipart
-#from email.mime.text import MIMEText
-#from email.mime.base import MIMEBase
-#from email import encoders
+############################ ABOUT ######################################
+##                     BACKUP SCRIPT VERSION: 2.0                       #
+###        THIS SCRIPT USING - VIDE DOCS OF LIBS                      ###
+#                 SCHEDULE LIB                                          # 
+#                 EMAIL LIB                                             #
+#                 SMTPLIB                                               #
+#                 SUBPROCESS LIB                                        #
+# ######################### FEATURES ####################################
+#          THIS SCRIPT USE RSYNC FOR SINC BKPS IN:                      #         
+#                 LOCAL DISKS FOR MIRROR DATA                           #
+#                 LOCAL NETWORK FOR LAN-NAS                             #
+#                 OVER VPN IN REMOTE LAN                                #
+#                 IN CLOUD                                              #
+########################## LICENSE ######################################
+###       GNU General Public License                                  ###
+#########################################################################
+
+
+
+import smtplib
+import mimetypes
+import email.mime.application
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
+import schedule
 import subprocess
 import time
+import socket
+import os
+#######################################################################################################################################
+def check_smtp_connection(host, port):
+    try:
+        socket.create_connection((host, port), timeout=10)
+        return True
+    except (socket.timeout, socket.gaierror, socket.error) as e:
+        print(f"Erro ao conectar ao servidor SMTP: {e}")
+        return False
 
-#Limpa a lixeira antes do backup
+def send_emaill(pathlog):
+    smtp_host = 'smtp.hostinger.com.br'
+    smtp_port = 587
+    if not check_smtp_connection(smtp_host, smtp_port):
+        print(f"Erro: Não foi possível conectar ao servidor SMTP {smtp_host} na porta {smtp_port}.")
+        return False
+
+    try:
+        sender_email = 'conta@tcompany.net'
+        sender_password = 'xxxxxxxxx'
+
+        recipients = [
+            {'name': 'user1', 'email': 'user1@company.com'},
+            {'name': 'user2', 'email': 'user2@tcomapany.net.br'},
+            {'name': 'Admin', 'email': 'admin@company.net'}
+        ]
+
+        # Lendo o conteúdo do log
+        with open(pathlog, 'r') as file:
+            log_content = file.read()
+
+        for recipient in recipients:
+            message = MIMEMultipart('alternative')
+            message['From'] = sender_email
+            message['To'] = recipient['email']
+            message['Subject'] = 'Logs de Backup COMPANY'
+
+            body_text = f"Olá {recipient['name']},\n\nSeguem os logs de backup PDC-COMPANY!\n\n"
+            body_html = f"""
+            <html>
+                <body>
+                    <p>Olá {recipient['name']},</p>
+                    <p>Seguem os logs de backup PDC-COMPANY!</p>
+                    <pre>{log_content}</pre>
+                </body>
+            </html>
+            """
+
+            part1 = MIMEText(body_text, 'plain')
+            part2 = MIMEText(body_html, 'html')
+
+            message.attach(part1)
+            message.attach(part2)
+
+            server = smtplib.SMTP(smtp_host, smtp_port)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(message)
+            server.quit()
+        print("\nEmails enviados com sucesso")
+        return True
+    except Exception as e:
+        print(f"\nErro ao enviar email: {e}")
+        return False
+
+
+# Funções para criar os logs com diferentes sufixos
+def geralog(suffix):
+
+    date = time.strftime("%Y-%m-%d")
+    logfile = f'{date}-backup-{suffix}.txt'
+    pathlog = f'/var/log/backup/{logfile}'
+    # Cria o diretório de logs caso não exista
+    os.makedirs(os.path.dirname(logfile), exist_ok=True)
+    return pathlog
+
+# Limpa a lixeira antes do backup
 def limpa_lixo():
     limpeza = 'rm -rf /dados/lixeira/*'
-    subprocess.call(limpeza ,shell=True)
+    subprocess.call(limpeza, shell=True)
     print("\nLixeira limpa com sucesso...")
 
-#Essa função gera um banner com a hora inicial do Backup
+# Gera um banner com a hora inicial do Backup
 def inicio(horaInicio):
-
     inicio = '''
  ===========================================================================
 ||  ____          _____ _  ___    _ _____    _____   _____                   ||
@@ -38,12 +134,12 @@ def inicio(horaInicio):
 ''' % horaInicio
     return inicio
 
-#Termino e calculos
-def termino(diaInicio, horaInicio, pathdestino_remoto_vpn_dados,pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home, pathdestino_local_dados,pathdestino_local_home, pathlog, backup, backup1):
+# Termino e cálculos
+def termino(diaInicio, horaInicio, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_local_dados, pathdestino_local_home, pathlog, backup, backup1):
     hoje = (time.strftime("%d-%m-%Y"))
-    horaFinal   = time.strftime('%H:%M:%S')
-    backup = backup.replace('tar cvf', '')
-    backup1 = backup1.replace('tar cvf', '')
+    horaFinal = time.strftime('%H:%M:%S')
+    backup = backup.replace('rsync -Cravzp', '')
+    backup1 = backup1.replace('rsync -Cravzp', '')
     final = '''
   ==========================================================================================================
                             BACKUP DIFF ATUALIZADO
@@ -57,183 +153,144 @@ def termino(diaInicio, horaInicio, pathdestino_remoto_vpn_dados,pathdestino_remo
                 BAK FILE LOCAL : %s
                 BAK FILE LOCAL : %s
   ==========================================================================================================
-    ''' % (diaInicio, horaInicio, hoje, horaFinal, pathlog, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home,pathdestino_remoto_vpn_dados,pathdestino_remoto_vpn_home,pathdestino_local_dados,pathdestino_local_home)
+    ''' % (diaInicio, horaInicio, hoje, horaFinal, pathlog, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_local_dados, pathdestino_local_home)
     return final
 
-
-#ESSA FUNÇÃO DESMONTA O HD DE BACKUP POR SEGURANÇA.
-#DESCOMENTE A LINHA desmonta_hd() DENTRO DE backupfull() PARA UTILIZÁ-LA
-def desmonta_hd(disk):
-    try:
-        umount = 'umount %s' % disk
-        subprocess.call(umount, shell=True)
-        return True
-    except:
-        return False
-
-
-#CONSTROI OS LOGS DO SISTEMA - Aqui selecionamos o nome do backup e o arquivo de logs que iremos criar.
-def geralog():
-    date = (time.strftime("%Y-%m-%d"))              #
-    logfile     = '%s-backup-diff.txt' % date       # Cria o arquivo de Log
-    pathlog     = '/var/log/backup/%s' % logfile    # Arquivo de log
-    return pathlog
-
-
-#CONSTROI O ARQUIVO E PATH DE BACKUP E RETORNA
+# Gera os comandos de backup
 def gerabackup():
     date = (time.strftime("%Y-%m-%d"))
-    # Opções que serão passadas com Rsync. Comentários no inicio do Script :)
-    opts    = 'Cravzp'
-    exclude = '*.log, *.tmp, .recycle,'              # Define os diretórios e tipos de arquivos que não vão ter backup
-    #backupfile  = '%s-backup-full.tar.gz' % date    # Cria o nome do arquivo de Backup
-    pathdestino_remoto_vpn_dados = '/media/xterm/d3c124cd-fe44-4485-9ff8-31f7f5603357/dados/'  # Destino onde será gravado o Backup Remoto VPN /dados
-    pathdestino_remoto_vpn_home = '/media/xterm/d3c124cd-fe44-4485-9ff8-31f7f5603357/home/'    # Destino onde será gravado o Backup Remoto VPN /dados
-    pathdestino_remoto_lan_dados = '/backup/dados/'                                           # Destino onde será gravado o Backup Remoto lan /dados       
-    pathdestino_remoto_lan_home = '/backup/home/'                                             # Destino onde será gravado o Backup Remoto lan /home
-    pathdestino_local_dados = '/backup/'                                                      # Destino onde será gravado o Backup Local em espelho /dados
-    pathdestino_local_home = '/backup/home/'                                                  # Destino onde será gravado o Backup Local em espelho /home
-    pathorigem  = '/dados/'                                                                   # pasta que será 'backupeada' /dados
-    pathorigem1  = '/home/'                                                                   # pasta que será 'backupeada' /home
-    
-    #Caso o backup seja na maquina, favor passar os parametros de backup_local
- 
-    backup_nas  = 'rsync -%s --exclude={%s} --progress %s -e ssh root@10.215.86.1:%s ' % (opts, exclude, pathorigem, pathdestino_remoto_vpn_dados)      # INCREMENTAL   
-    backup_nas1 = 'rsync -%s --exclude={%s} --progress %s -e ssh root@10.215.86.1:%s ' % (opts, exclude, pathorigem1, pathdestino_remoto_vpn_home)        # INCREMENTAL
-    backup      = 'rsync -%s --exclude={%s} --progress %s -e ssh root@192.168.1.96:%s ' % (opts, exclude, pathorigem, pathdestino_remoto_lan_dados)              # INCREMENTAL
-    backup1     = 'rsync -%s --exclude={%s} --progress %s -e ssh root@192.168.1.96:%s ' % (opts, exclude, pathorigem1, pathdestino_remoto_lan_home)              # INCREMENTAL
-    backup_local    = 'rsync -%s --exclude={%s} --progress %s %s --delete ' % (opts, exclude, pathorigem, pathdestino_local_dados)                               # ESPELHADO 
-    backup1_local   = 'rsync -%s --exclude={%s} --progress %s %s --delete ' % (opts, exclude, pathorigem1, pathdestino_local_home)                               # ESPELHADO
-    return backup_nas, backup_nas1, backup_local, backup1_local, backup, backup1, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home,pathdestino_local_dados,pathdestino_local_home
+    opts = 'Cravzp'
+    exclude = '*.log, *.tmp, .recycle,'
+    pathdestino_remoto_vpn_dados = '/media/xterm/29E7D9504B64265C/dados/'
+    pathdestino_remoto_vpn_home = '/media/xterm/29E7D9504B64265C/home/'
+    pathdestino_remoto_lan_dados = '/backup/dados/'
+    pathdestino_remoto_lan_home = '/backup/home/'
+    pathdestino_local_dados = '/backup/'
+    pathdestino_local_home = '/backup/home/'
+    pathorigem = '/dados/'
+    pathorigem1 = '/home/'
 
-##FUNCAO QUE ENVIA OS LOGS DE BACKUP PARA O ADMIN
-def send_email(pathlog):
-   try:
-     mailadmin="user@company.com.br"
-     senduser="user@company.com.br"
-     copia="user@company.com.br"
-     smtp="smtp.company.com.br:porta"
-     senha=password"
-     command="/usr/local/bin/sendEmail -f %s -t %s -cc %s -u 'Logs de backup AD' -a %s -s %s -o tls=no -xu %s -xp %s -m 'Seguem logs de backup AD'" % (senduser,mailadmin,copia,pathlog,smtp,mailadmin,senha)
-     subprocess.call(command,shell=True)
-   # Create a text/plain message
-   
-     print("\nEmail enviado com sucesso")
-   except:
-     print("\nErro ao enviar email")
+    backup_nas = f'rsync -{opts} --exclude={{ {exclude} }} --progress {pathorigem} -e ssh root@10.215.86.1:{pathdestino_remoto_vpn_dados} '
+    backup_nas1 = f'rsync -{opts} --exclude={{ {exclude} }} --progress {pathorigem1} -e ssh root@10.215.86.1:{pathdestino_remoto_vpn_home} '
+    backup = f'rsync -{opts} --exclude={{ {exclude} }} --progress {pathorigem} -e ssh root@172.16.8.1:{pathdestino_remoto_lan_dados} '
+    backup1 = f'rsync -{opts} --exclude={{ {exclude} }} --progress {pathorigem1} -e ssh root@172.16.8.1:{pathdestino_remoto_lan_home} '
+    backup_local = f'rsync -{opts} --exclude={{ {exclude} }} --progress {pathorigem} {pathdestino_local_dados} --delete '
+    backup1_local = f'rsync -{opts} --exclude={{ {exclude} }} --progress {pathorigem1} {pathdestino_local_home} --delete '
+    return backup_nas, backup_nas1, backup_local, backup1_local, backup, backup1, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_local_dados, pathdestino_local_home
 
-### ABRE CONEXAO COM A VPN ###
-def vpn_conect():
-   pathovpnfile = '/root/backup.ovpn'
-   conect = 'openvpn --config %s &' % pathovpnfile
-   ip_tunel = 'ip_gate_tunel'
+
+#CHECK VPN TUNEL LAN2LAN PACO
+def check_lan():
+##################################### CHECK TUNNEL #################################################
+   ip_tunel = '172.16.8.1' #Ip LAN-NAS
    try:
-     subprocess.call(conect,shell=True)
-     #subprocess.check_output([conect])
-     check = 'ping -c 5 %s' %ip_tunel
+     check = 'ping -c 5 %s' %ip_tunel 
      subprocess.call(check,shell=True)
      print("Conexão Ok, host responde...")
      return True
    except:
      print("Conexão FAIL...")
-     return False   
-     
-### SINCRONIZA BACKUP NO NAS LOCAL ###
-def backup_nas_local(): 
+     return False
+    # break
+#####################################################################################################
 
+
+# Abre conexão com a VPN
+def vpn_conect():
+    pathovpnfile = '/home/user/vpn.conf '
+    conect = f'openvpn --config {pathovpnfile} &'
+    ip_tunel = '172.16.8.1'
+    try:
+        subprocess.call(conect, shell=True)
+        check = f'ping -c 5 {ip_tunel}'
+        subprocess.call(check, shell=True)
+        print("Conexão Ok, host responde...")
+        return True
+    except:
+        print("Conexão FAIL...")
+        return False
+
+# Sincroniza backup no NAS local
+def backup_nas_local():
+### CHECA CONEXAO COM NAS LAN ###
+    check_lan()
+##################################### 
     horaInicio = time.strftime('%H:%M:%S')
-    pathlog = geralog()
-    backup_nas, backup_nas1, backup_local, backup1_local, backup, backup1, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home,pathdestino_local_dados,pathdestino_local_home = gerabackup()
-    log = ' >> %s' % pathlog
+    pathlog = geralog("local-diff")
+    backup_nas, backup_nas1, backup_local, backup1_local, backup, backup1, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_local_dados, pathdestino_local_home = gerabackup()
+    log = f' >> {pathlog}'
     start = inicio(horaInicio)
-      
-    x = open(pathlog, 'w')
-    x.write(start)
-    x.close()
+    
+    with open(pathlog, 'w') as x:
+        x.write(start)
 
-    subprocess.call(backup + log ,shell=True)
-    subprocess.call(backup1 + log ,shell=True)
+    subprocess.call(backup + log, shell=True)
+    subprocess.call(backup1 + log, shell=True)
 
-#Printa o final e relatório
-    diaInicio = (time.strftime("%d-%m-%Y"))
-    final = termino(diaInicio, horaInicio, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home,pathdestino_remoto_vpn_dados,pathdestino_remoto_vpn_home,pathdestino_local_dados,pathdestino_local_home,pathlog,backup,backup1)
-    r = open(pathlog, 'r') # Abra o arquivo (leitura)
-    conteudo = r.readlines()
-    conteudo.append(final)   # insira seu conteúdo
-    r = open(pathlog, 'w') # Abre novamente o arquivo (escrita)
-    r.writelines(conteudo)    # escreva o conteúdo criado anteriormente nele.
-    r.close()
-    send_email(pathlog)
+    diaInicio = time.strftime("%d-%m-%Y")
+    final = termino(diaInicio, horaInicio, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_local_dados, pathdestino_local_home, pathlog, backup, backup1)
+    with open(pathlog, 'a') as r:
+        r.write(final)
 
-### SINCRONIZA BACKUP NO NAS REMOTO ###
-def backup_nas_vpn(): 
+    send_emaill(pathlog)
 
-    #ABRE O TUNEL COM O NAS REMOTO
+# Funções específicas para diferentes tipos de backup
+def backup_nas_vpn():
     vpn_conect()
     
     horaInicio = time.strftime('%H:%M:%S')
-    pathlog = geralog()
-    backup_nas, backup_nas1, backup_local, backup1_local, backup, backup1, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home,pathdestino_local_dados,pathdestino_local_home = gerabackup()
-    log = ' >> %s' % pathlog
+    pathlog = geralog("vpn-full")
+    backup_nas, backup_nas1, backup_local, backup1_local, backup, backup1, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_local_dados, pathdestino_local_home = gerabackup()
+    log = f' >> {pathlog}'
     start = inicio(horaInicio)
       
-    x = open(pathlog, 'w')
-    x.write(start)
-    x.close()
+    with open(pathlog, 'w') as x:
+        x.write(start)
 
     subprocess.call(backup_nas + log ,shell=True)
     subprocess.call(backup_nas1 + log ,shell=True)
 
-#Printa o final e relatório
-    diaInicio = (time.strftime("%d-%m-%Y"))
-    final = termino(diaInicio, horaInicio, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home,pathdestino_remoto_vpn_dados,pathdestino_remoto_vpn_home,pathdestino_local_dados,pathdestino_local_home,pathlog,backup_nas,backup_nas1)
-    r = open(pathlog, 'r') # Abra o arquivo (leitura)
-    conteudo = r.readlines()
-    conteudo.append(final)   # insira seu conteúdo
-    r = open(pathlog, 'w') # Abre novamente o arquivo (escrita)
-    r.writelines(conteudo)    # escreva o conteúdo criado anteriormente nele.
-    r.close()
-    send_email(pathlog)
-    end_tunel = 'pkill openvpn'
-    subprocess.call(end_tunel + log ,shell=True)
+    diaInicio = time.strftime("%d-%m-%Y")
+    final = termino(diaInicio, horaInicio, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_local_dados, pathdestino_local_home, pathlog, backup_nas, backup_nas1)
+    with open(pathlog, 'a') as r:
+        r.write(final)
 
-#CRIA BACKUP ESPELHO EM HD EXTERNO
+    send_emaill(pathlog)
+    end_tunel = 'pkill openvpn'
+    subprocess.call(end_tunel, shell=True)
+
 def backup_hd_espelho():
-    #disk = '/dev/sdx'        #Define onde está a partição que será usada para guardar o backup
     horaInicio = time.strftime('%H:%M:%S')
-    pathlog = geralog()
-    backup_nas, backup_nas1, backup_local, backup1_local, backup, backup1, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home,pathdestino_local_dados,pathdestino_local_home = gerabackup()
-    log = ' >> %s' % pathlog
+    pathlog = geralog("espelho-diff")
+    backup_nas, backup_nas1, backup_local, backup1_local, backup, backup1, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_local_dados, pathdestino_local_home = gerabackup()
+    log = f' >> {pathlog}'
     start = inicio(horaInicio)
     
-    x = open(pathlog, 'w')
-    x.write(start)
-    x.close()
+    with open(pathlog, 'w') as x:
+        x.write(start)
 
-    #Monta o hd de backup
-   # mount = 'mount '+ disk + ' /backup'
-    #subprocess.call(mount, shell=True)
-          
-    #RODA O BACKUP
     subprocess.call(backup_local + log, shell=True)
     subprocess.call(backup1_local + log, shell=True)
-        
-    #Printa o final e relatório
-    diaInicio = (time.strftime("%d-%m-%Y"))
-    final = termino(diaInicio, horaInicio, pathdestino_remoto_lan_dados,pathdestino_remoto_lan_home,pathdestino_remoto_vpn_dados,pathdestino_remoto_vpn_home,pathdestino_local_dados,pathdestino_local_home,pathlog,backup_local,backup1_local)
 
-    r = open(pathlog, 'r') # Abra o arquivo (leitura)
-    conteudo = r.readlines()
-    conteudo.append(final)   # insira seu conteúdo
-    r = open(pathlog, 'w') # Abre novamente o arquivo (escrita)
-    r.writelines(conteudo)    # escreva o conteúdo criado anteriormente nele.
-    r.close()
-    #Descomente essa função para desmontar a partição que será utilizada para armazenar o backup
-    #desmonta_hd(disk)
-    send_email(pathlog)
+    diaInicio = time.strftime("%d-%m-%Y")
+    final = termino(diaInicio, horaInicio, pathdestino_remoto_vpn_dados, pathdestino_remoto_vpn_home, pathdestino_remoto_lan_dados, pathdestino_remoto_lan_home, pathdestino_local_dados, pathdestino_local_home, pathlog, backup_local, backup1_local)
+    with open(pathlog, 'a') as r:
+        r.write(final)
 
-##########################################################################MAIN########################################################################
-limpa_lixo()
-backup_nas_vpn()
-backup_hd_espelho()
-#backup_nas_local()
+    send_emaill(pathlog)
+
+def define_hora_backup():
+    print("\nRodando tarefa de backup diário...")
+    #backup_nas_vpn()
+    limpa_lixo()
+    backup_nas_local()
+
+#####################################################PROGRAMA PRINCIPAL#############################################################################
+
+# Agendar a execução do backup
+schedule.every().day.at("20:00").do(define_hora_backup)
+
+# Loop para manter o agendador rodando
+while True:
+    schedule.run_pending()
+    time.sleep(1)
